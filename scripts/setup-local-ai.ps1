@@ -44,7 +44,7 @@ catch {
   Start-Sleep -Seconds 3
 }
 
-# Do not download the model again when it already exists.
+# Do not download the model again when it already exists in the configured Ollama store.
 $modelName = "qwen3:8b"
 $installed = $false
 try {
@@ -75,14 +75,19 @@ $python = if (Test-Command "py") { "py" } else { "python" }
 Write-Host "Installing Piper TTS..." -ForegroundColor Yellow
 & $python -m pip install --upgrade "piper-tts==1.8.0"
 
-# Keep the Piper voice/model beside the Ollama models so all local AI assets stay on D:\ollama.
+# Keep the Piper voice/model beside the Ollama models so all local AI assets stay on the same drive.
+$piperModelName = "vi_VN-vais1000-medium"
 $modelDir = Join-Path $aiRoot "piper"
 New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
-
-$piperModelName = "vi_VN-vais1000-medium"
 $piperModelPath = Join-Path $modelDir "$piperModelName.onnx"
 $piperConfigPath = Join-Path $modelDir "$piperModelName.onnx.json"
 $piperModelBase = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/vi/vi_VN/vais1000/medium"
+
+# Persist the Piper model location so Electron/Next uses the same D:\ollama location.
+$env:PIPER_MODEL_NAME = $piperModelName
+$env:PIPER_MODEL_PATH = $piperModelPath
+[Environment]::SetEnvironmentVariable("PIPER_MODEL_NAME", $piperModelName, "User")
+[Environment]::SetEnvironmentVariable("PIPER_MODEL_PATH", $piperModelPath, "User")
 
 if (-not (Test-Path $piperModelPath)) {
   Write-Host "Downloading Vietnamese Piper voice..." -ForegroundColor Yellow
@@ -93,10 +98,13 @@ if (-not (Test-Path $piperModelPath)) {
 
 if (-not (Test-Path $piperConfigPath)) {
   Invoke-WebRequest -Uri "$piperModelBase/$piperModelName.onnx.json?download=true" -OutFile $piperConfigPath
+} else {
+  Write-Host "Vietnamese Piper voice config already exists. Skipping download." -ForegroundColor Green
 }
 
 Write-Host "`nLocal AI setup completed." -ForegroundColor Green
 Write-Host "Ollama model: $modelName"
 Write-Host "Piper voice: $piperModelName"
 Write-Host "AI data: $aiRoot"
+Write-Host "Piper model: $piperModelPath"
 Write-Host "`nYou can now run: npm run desktop:dev`n" -ForegroundColor Cyan
