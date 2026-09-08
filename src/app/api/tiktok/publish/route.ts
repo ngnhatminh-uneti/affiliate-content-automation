@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import path from "node:path";
 import { getJob } from "@/lib/jobs";
 import { publishVideo } from "@/lib/tiktok";
+import { recordEvent } from "@/lib/analytics";
 import { z } from "zod";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
 const schema = z.object({ jobId:z.string().uuid(), caption:z.string().max(2200), privacyLevel:z.string().default("SELF_ONLY"), confirm:z.literal(true) });
 
 export async function POST(request: Request) {
@@ -16,9 +16,11 @@ export async function POST(request: Request) {
   if (!job?.outputPath || job.status !== "completed") return NextResponse.json({ error:"Video chưa render xong." }, { status:409 });
   try {
     const localPath = path.join(process.cwd(), "public", job.outputPath.replace(/^\//, ""));
+    await recordEvent({ type:"tiktok_publish_started", jobId:job.id, productName:job.productName });
     const result = await publishVideo(localPath, parsed.data.caption, parsed.data.privacyLevel);
     return NextResponse.json({ ok:true, ...result });
   } catch (error) {
+    await recordEvent({ type:"tiktok_publish_failed", jobId:job.id, productName:job.productName, metadata:{ reason:error instanceof Error ? error.message : "unknown" } });
     return NextResponse.json({ error:error instanceof Error ? error.message : "TikTok publish thất bại" }, { status:500 });
   }
 }
