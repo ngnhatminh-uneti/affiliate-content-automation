@@ -1,3 +1,4 @@
+import type React from "react";
 import { registerRoot, Composition } from "remotion";
 import { AffiliateVideo, AffiliateVideoProps } from "./AffiliateVideo";
 
