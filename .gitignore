@@ -8,3 +8,5 @@ out
 *.log
 coverage
 remotion-output
+public/generated
+data/jobs
