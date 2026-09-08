@@ -1,70 +1,62 @@
 import { promises as fs } from "node:fs";
+import { spawn } from "node:child_process";
 import path from "node:path";
+import { getMediaDir, getModelsDir } from "./paths";
 
-const MODEL = "gemini-2.5-flash-preview-tts";
-const API = "https://generativelanguage.googleapis.com/v1beta/interactions";
+const MODEL_NAME = process.env.PIPER_MODEL_NAME || "vi_VN-vais1000-medium";
+const MODEL_PATH = process.env.PIPER_MODEL_PATH || path.join(getModelsDir(), `${MODEL_NAME}.onnx`);
 
-function pcmToWav(pcm: Buffer, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
-  const byteRate = sampleRate * channels * bitsPerSample / 8;
-  const blockAlign = channels * bitsPerSample / 8;
-  const header = Buffer.alloc(44);
-  header.write("RIFF", 0);
-  header.writeUInt32LE(36 + pcm.length, 4);
-  header.write("WAVE", 8);
-  header.write("fmt ", 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(channels, 22);
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(byteRate, 28);
-  header.writeUInt16LE(blockAlign, 32);
-  header.writeUInt16LE(bitsPerSample, 34);
-  header.write("data", 36);
-  header.writeUInt32LE(pcm.length, 40);
-  return Buffer.concat([header, pcm]);
+function commandCandidates() {
+  if (process.platform === "win32") return [["piper"], ["py", "-m", "piper"], ["python", "-m", "piper"]];
+  return [["piper"], ["python3", "-m", "piper"], ["python", "-m", "piper"]];
 }
 
-export async function generateSpeech(text: string, options?: { voice?: string; style?: string }) {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("GEMINI_API_KEY is not configured");
-  const voice = options?.voice || "Kore";
-  const style = options?.style || "natural, friendly, energetic Vietnamese TikTok creator; clear diction; medium-fast pace";
-
-  const response = await fetch(API, {
-    method: "POST",
-    headers: {
-      "x-goog-api-key": key,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      input: `${style}. Read this Vietnamese script exactly as written:\n${text}`,
-      response_format: { type: "audio" },
-      generation_config: {
-        speech_config: [{ voice, language: "vi" }],
-      },
-    }),
-  });
-
-  const data = await response.json() as any;
-  if (!response.ok || data.error) {
-    throw new Error(data.error?.message || "Gemini TTS generation failed");
+async function runPiper(text: string, outputFile: string, speed = 1) {
+  let lastError = "Piper không khả dụng";
+  for (const [command, ...prefix] of commandCandidates()) {
+    const args = [...prefix, "--model", MODEL_PATH, "--output_file", outputFile, "--length_scale", String(1 / Math.max(0.7, Math.min(1.4, speed)))];
+    const result = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      const child = spawn(command, args, { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
+      let stderr = "";
+      child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+      child.on("error", (error: NodeJS.ErrnoException) => resolve({ ok: false, error: error.message }));
+      child.on("close", (code) => resolve({ ok: code === 0, error: stderr.trim() }));
+      child.stdin.write(text);
+      child.stdin.end();
+    });
+    if (result.ok) return;
+    lastError = result.error || lastError;
   }
+  throw new Error(`${lastError}. Hãy chạy scripts/setup-local-ai.ps1 để cài local TTS.`);
+}
 
-  const base64 = data.output_audio?.data ?? data.outputAudio?.data;
-  if (!base64) throw new Error("Gemini TTS returned no audio data");
+async function wavDuration(file: string) {
+  const data = await fs.readFile(file);
+  if (data.length < 44) return 1;
+  const byteRate = data.readUInt32LE(28) || 32000;
+  return Math.max(1, (data.length - 44) / byteRate);
+}
 
-  const pcm = Buffer.from(base64, "base64");
-  const wav = pcmToWav(pcm);
+export async function checkPiper() {
+  try { await fs.access(MODEL_PATH); } catch { return false; }
+  return new Promise<boolean>((resolve) => {
+    const [command, ...prefix] = commandCandidates()[0];
+    const child = spawn(command, [...prefix, "--help"], { stdio: "ignore", windowsHide: true });
+    child.on("error", () => resolve(false));
+    child.on("close", () => resolve(true));
+  });
+}
+
+export async function generateSpeech(text: string, options?: { voice?: string; style?: string; speed?: number }) {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) throw new Error("TTS nhận văn bản rỗng");
+  try { await fs.access(MODEL_PATH); } catch { throw new Error(`Chưa có voice model ${MODEL_NAME}. Hãy chạy scripts/setup-local-ai.ps1.`); }
   const id = crypto.randomUUID();
-  const dir = path.join(process.cwd(), "public", "generated", "audio");
+  const dir = getMediaDir("audio");
   await fs.mkdir(dir, { recursive: true });
   const filename = `${id}.wav`;
-  await fs.writeFile(path.join(dir, filename), wav);
-
-  return {
-    id,
-    publicPath: `/generated/audio/${filename}`,
-    durationSeconds: Math.max(1, pcm.length / (24000 * 2)),
-  };
+  const outputFile = path.join(dir, filename);
+  await runPiper(clean, outputFile, 1);
+  const durationSeconds = await wavDuration(outputFile);
+  return { id, publicPath: `/api/media/audio/${filename}`, durationSeconds, model: MODEL_NAME, local: true };
 }
