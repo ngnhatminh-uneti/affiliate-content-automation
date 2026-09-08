@@ -3,7 +3,7 @@ import { Composition, registerRoot } from "remotion";
 import { AffiliateVideo, AffiliateVideoProps } from "./AffiliateVideo";
 
 export const RemotionRoot: React.FC = () => (
-  <Composition<AffiliateVideoProps>
+  <Composition
     id="AffiliateVideo"
     component={AffiliateVideo}
     durationInFrames={30 * 30}
