@@ -1,5 +1,5 @@
 import type React from "react";
-import { registerRoot, Composition } from "remotion";
+import { Composition, registerRoot } from "remotion";
 import { AffiliateVideo, AffiliateVideoProps } from "./AffiliateVideo";
 
 export const RemotionRoot: React.FC = () => (
@@ -15,6 +15,7 @@ export const RemotionRoot: React.FC = () => (
       hook: "Bạn có đang bỏ lỡ món này?",
       script: "Video giới thiệu sản phẩm ngắn gọn, rõ lợi ích và trung thực.",
       cta: "Xem sản phẩm ở bio",
+      subtitles: [],
     }}
   />
 );
